@@ -246,8 +246,9 @@ jobs:
       - name: Build Linux ARM64
         run: |
           cd simple_live_app
-          flutter config --target-platform linux-arm64
-          flutter build linux --release --target-platform linux-arm64
+          flutter_distributor package --platform linux  --targets deb,zip --skip-clean
+          #flutter config --target-platform linux-arm64
+          #flutter build linux --release --target-platform linux-arm64
           # 注意：flutter_distributor可能不支持直接指定arm64，可能需要手动处理或使用其他工具打包
           # flutter_distributor package --platform linux --arch=arm64 --targets deb,zip --skip-clean # 这行可能需要调整或替换为其他命令
   
