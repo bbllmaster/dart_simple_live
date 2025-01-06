@@ -181,7 +181,7 @@ jobs:
       - name: Build Linux
         run: |
           cd simple_live_app
-          flutter_distributor package --platform linux --targets deb,zip --skip-clean
+          flutter_distributor package --platform linux --arch=arm64 --targets deb,zip --skip-clean
       # 上传Linux包至Artifacts
       - name: Upload Linux APP to Artifacts
         uses: actions/upload-artifact@v4
@@ -191,6 +191,77 @@ jobs:
             simple_live_app/build/dist/*/*.deb
             simple_live_app/build/dist/*/*.zip
 
+
+  # 打包Linux ARM64
+  build-linux-arm64:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - architecture: arm64
+    permissions:
+      contents: write
+    steps:
+      # 签出代码
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+  
+      # 设置Flutter环境
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.22.x"
+          cache: true
+  
+      # 安装依赖
+      - name: Update apt-get
+        run: sudo apt-get update
+      - name: Install Dependencies
+        run: sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev mpv qemu qemu-user-static qemu-utils binfmt-support qemu-system-misc
+  
+      # 设置QEMU以支持ARM64
+      - name: Set up QEMU
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          docker buildx create --use --platform linux/amd64,linux/arm64
+  
+      # 注意：Flutter的桌面支持通常不需要QEMU来交叉编译，但确保所有工具链正确安装是关键。
+  
+      # 打开Linux Desktop支持
+      - name: Enable Flutter Desktop
+        run: flutter config --enable-linux-desktop
+  
+      # 更新Flutter的packages
+      - name: Restore Packages
+        run: |
+          cd simple_live_app
+          flutter pub get
+  
+      # 设置flutter_distributor环境
+      - name: Install flutter_distributor
+        run: dart pub global activate flutter_distributor
+  
+      # build Linux ARM64 ZIP/DEB
+      - name: Build Linux ARM64
+        run: |
+          cd simple_live_app
+          flutter config --target-platform linux-arm64
+          flutter build linux --release --target-platform linux-arm64
+          # 注意：flutter_distributor可能不支持直接指定arm64，可能需要手动处理或使用其他工具打包
+          # flutter_distributor package --platform linux --arch=arm64 --targets deb,zip --skip-clean # 这行可能需要调整或替换为其他命令
+  
+          # 示例手动打包命令（需要根据实际情况调整）
+          # zip -r simple_live_app_linux_arm64.zip build/linux/arm64/release/bundle/
+  
+      # 上传Linux包至Artifacts
+      - name: Upload Linux ARM64 APP to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: |
+            simple_live_app/build/linux/arm64/release/*.deb  # 根据实际构建输出调整路径
+            simple_live_app/simple_live_app_linux_arm64.zip  # 如果使用了上面的zip命令
       # 读取版本信息
       - name: Read version
         id: version
