@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:auto_orientation/auto_orientation.dart';
+import 'package:auto_orientation_v2/auto_orientation_v2.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:floating/floating.dart';
@@ -12,7 +12,7 @@ import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:ns_danmaku/ns_danmaku.dart';
-import 'package:perfect_volume_control/perfect_volume_control.dart';
+import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
@@ -33,11 +33,20 @@ mixin PlayerMixin {
       logLevel: AppSettingsController.instance.logEnable.value
           ? MPVLogLevel.info
           : MPVLogLevel.error,
-      // bufferSize:
-      //     // media-kit #549
-      //     AppSettingsController.instance.playerBufferSize.value * 1024 * 1024,
     ),
   );
+  /// 初始化播放器并设置 ao 参数
+  Future<void> initializePlayer() async {
+    // 设置音频输出驱动
+    if (AppSettingsController.instance.customPlayerOutput.value) {
+      if (player.platform is NativePlayer) {
+        await (player.platform as dynamic).setProperty(
+          'ao',
+          AppSettingsController.instance.audioOutputDriver.value,
+        );
+      }
+    }
+  }
 
   /// 视频控制器
   late final videoController = VideoController(
@@ -59,6 +68,7 @@ mixin PlayerMixin {
               ),
   );
 }
+
 mixin PlayerStateMixin on PlayerMixin {
   ///音量控制条计时器
   Timer? hidevolumeTimer;
@@ -207,15 +217,16 @@ mixin PlayerDanmakuMixin on PlayerStateMixin {
 }
 mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-  final screenBrightness = ScreenBrightness();
 
   final pip = Floating();
   StreamSubscription<PiPStatus>? _pipSubscription;
 
+  final VolumeController volumeController = VolumeController();
+
   /// 初始化一些系统状态
   void initSystem() async {
     if (Platform.isAndroid || Platform.isIOS) {
-      PerfectVolumeControl.hideUI = true;
+      volumeController.showSystemUI = false;
     }
 
     // 屏幕常亮
@@ -233,7 +244,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   /// 释放一些系统状态
   Future resetSystem() async {
     _pipSubscription?.cancel();
-    pip.dispose();
+    //pip.dispose();
     await SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
       overlays: SystemUiOverlay.values,
@@ -243,7 +254,7 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
     if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       // 亮度重置,桌面平台可能会报错,暂时不处理桌面平台的亮度
       try {
-        await screenBrightness.resetScreenBrightness();
+        await ScreenBrightness.instance.resetApplicationScreenBrightness();
       } catch (e) {
         Log.logPrint(e);
       }
@@ -437,10 +448,12 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
       ratio = const Rational.landscape();
     }
     await pip.enable(
-      aspectRatio: ratio,
+      ImmediatePiP(
+        aspectRatio: ratio,
+      ),
     );
 
-    _pipSubscription ??= pip.pipStatus$.listen((event) {
+    _pipSubscription ??= pip.pipStatusStream.listen((event) {
       if (event == PiPStatus.disabled) {
         danmakuController?.clear();
         showDanmakuState.value = danmakuStateBeforePIP;
@@ -522,12 +535,14 @@ mixin PlayerGestureControlMixin
     throttle = DelayedThrottle(200);
 
     verticalDragging = true;
-    showGestureTip.value = true;
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+      showGestureTip.value = true;
+    }
     if (Platform.isAndroid || Platform.isIOS) {
-      _currentVolume = await PerfectVolumeControl.volume;
+      _currentVolume = await volumeController.getVolume();
     }
     if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      _currentBrightness = await screenBrightness.current;
+      _currentBrightness = await ScreenBrightness.instance.application;
     }
   }
 
@@ -586,9 +601,9 @@ mixin PlayerGestureControlMixin
     return (volume / 5).round() * 5;
   }
 
-  Future<void> _realSetVolume(int volume) async {
+  Future _realSetVolume(int volume) async {
     Log.logPrint(volume);
-    return await PerfectVolumeControl.setVolume(volume / 100);
+    volumeController.setVolume(volume / 100);
   }
 
   void setGestureBrightness(double dy) {
@@ -600,7 +615,7 @@ mixin PlayerGestureControlMixin
       if (seek < 0) {
         seek = 0;
       }
-      screenBrightness.setScreenBrightness(seek);
+      ScreenBrightness.instance.setApplicationScreenBrightness(seek);
 
       gestureTipText.value = "亮度 ${(seek * 100).toInt()}%";
       Log.logPrint(value);
@@ -611,7 +626,7 @@ mixin PlayerGestureControlMixin
         seek = 1;
       }
 
-      screenBrightness.setScreenBrightness(seek);
+      ScreenBrightness.instance.setApplicationScreenBrightness(seek);
       gestureTipText.value = "亮度 ${(seek * 100).toInt()}%";
       Log.logPrint(value);
     }

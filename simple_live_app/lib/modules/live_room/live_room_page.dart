@@ -169,7 +169,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             color: Theme.of(context).cardColor,
             border: Border(
               top: BorderSide(
-                color: Colors.grey.withOpacity(.1),
+                color: Colors.grey.withAlpha(25),
               ),
             ),
           ),
@@ -186,6 +186,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 icon: const Icon(Remix.refresh_line),
                 label: const Text("刷新"),
               ),
+              AppStyle.hGap4,
               Obx(
                 () => controller.followed.value
                     ? TextButton.icon(
@@ -222,10 +223,17 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 icon: const Icon(Remix.file_copy_line),
                 label: const Text("复制链接"),
               ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  textStyle: const TextStyle(fontSize: 14),
+                ),
+                onPressed: controller.copyPlayUrl,
+                icon: const Icon(Remix.file_copy_line),
+                label: const Text("复制播放直链"),
+              ),
             ],
           ),
         ),
-        //buildBottomActions(context),
       ],
     );
   }
@@ -284,10 +292,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         color: Theme.of(context).cardColor,
         border: Border(
           top: BorderSide(
-            color: Colors.grey.withOpacity(.1),
+            color: Colors.grey.withAlpha(25),
           ),
           bottom: BorderSide(
-            color: Colors.grey.withOpacity(.1),
+            color: Colors.grey.withAlpha(25),
           ),
         ),
       ),
@@ -301,7 +309,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           children: [
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.withOpacity(.2)),
+                border: Border.all(color: Colors.grey.withAlpha(50)),
                 borderRadius: AppStyle.radius24,
               ),
               child: NetImage(
@@ -371,7 +379,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         color: Theme.of(context).cardColor,
         border: Border(
           top: BorderSide(
-            color: Colors.grey.withOpacity(.1),
+            color: Colors.grey.withAlpha(25),
           ),
         ),
       ),
@@ -532,7 +540,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 Flexible(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.blueGrey.withOpacity(.1),
+                      color: Colors.blueGrey.withAlpha(25),
                       //borderRadius: AppStyle.radius8,
                       borderRadius: const BorderRadius.only(
                         topRight: Radius.circular(12),
@@ -665,6 +673,17 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   value: AppSettingsController.instance.chatBubbleStyle.value,
                   onChanged: (e) {
                     AppSettingsController.instance.setChatBubbleStyle(e);
+                  },
+                ),
+              ),
+              AppStyle.divider,
+              Obx(
+                () => SettingsSwitch(
+                  title: "播放器中显示SC",
+                  value:
+                      AppSettingsController.instance.playershowSuperChat.value,
+                  onChanged: (e) {
+                    AppSettingsController.instance.setPlayerShowSuperChat(e);
                   },
                 ),
               ),

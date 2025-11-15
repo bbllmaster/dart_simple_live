@@ -72,6 +72,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 线路数据
   RxList<String> playUrls = RxList<String>();
 
+  Map<String, String>? playHeaders;
+
   /// 当前线路
   var currentLineIndex = -1;
   var currentLineInfo = "".obs;
@@ -100,6 +102,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 直播间加载失败
   var loadError = false.obs;
   Error? error;
+
+  // 开播时长状态变量
+  var liveDuration = "00:00:00".obs;
+  Timer? _liveDurationTimer;
 
   @override
   void onInit() {
@@ -276,6 +282,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     try {
       SmartDialog.showLoading(msg: "");
       loadError.value = false;
+      error = null;
+      update();
       addSysMsg("正在读取直播间信息");
       detail.value = await site.liveSite.getRoomDetail(roomId: roomId);
 
@@ -309,6 +317,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       getSuperChatMessage();
 
       addHistory();
+      // 确认房间关注状态
+      followed.value = DBService.instance.getFollowExist("${site.id}_$roomId");
       online.value = detail.value!.online;
       liveStatus.value = detail.value!.status || detail.value!.isRecord;
       if (liveStatus.value) {
@@ -320,6 +330,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       addSysMsg("开始连接弹幕服务器");
       initDanmau();
       liveDanmaku.start(detail.value?.danmakuData);
+      startLiveDurationTimer(); // 启动开播时长定时器
     } catch (e) {
       Log.logPrint(e);
       //SmartDialog.showToast(e.toString());
@@ -385,11 +396,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     currentLineIndex = -1;
     var playUrl = await site.liveSite
         .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
-    if (playUrl.isEmpty) {
+    if (playUrl.urls.isEmpty) {
       SmartDialog.showToast("无法读取播放地址");
       return;
     }
-    playUrls.value = playUrl;
+    playUrls.value = playUrl.urls;
+    playHeaders = playUrl.headers;
     currentLineIndex = 0;
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     //重置错误次数
@@ -407,32 +419,21 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void setPlayer() async {
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     errorMsg.value = "";
-    Map<String, String> headers = {};
-    if (site.id == Constant.kBiliBili) {
-      headers = {
-        "referer": "https://live.bilibili.com",
-        "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36 Edg/115.0.1901.188"
-      };
-    } else if (site.id == Constant.kHuya) {
-      headers = {
-        //"referer": "https://m.huya.com",
-        "user-agent": "HYSDK(Windows, 20000308)"
-      };
-    }
 
     var playurl = playUrls[currentLineIndex];
     if (AppSettingsController.instance.playerForceHttps.value) {
       playurl = playurl.replaceAll("http://", "https://");
     }
 
-    player.open(
+    // 初始化播放器并设置 ao 参数
+    await initializePlayer();
+
+    await player.open(
       Media(
         playurl,
-        httpHeaders: headers,
+        httpHeaders: playHeaders,
       ),
     );
-
     Log.d("播放链接\r\n：$playurl");
   }
 
@@ -578,6 +579,22 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     Utils.copyToClipboard(detail.value!.url);
     SmartDialog.showToast("已复制直播间链接");
+  }
+
+  /// 复制新生成的直播流
+  void copyPlayUrl() async {
+    // 未开播不复制
+    if (!liveStatus.value) {
+      return;
+    }
+    var playUrl = await site.liveSite
+        .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
+    if (playUrl.urls.isEmpty) {
+      SmartDialog.showToast("无法读取播放地址");
+      return;
+    }
+    Utils.copyToClipboard(playUrl.urls.first);
+    SmartDialog.showToast("已复制播放直链");
   }
 
   /// 底部打开播放器设置
@@ -1013,6 +1030,37 @@ ${error?.stackTrace}''');
     }
   }
 
+  // 用于启动开播时长计算和更新的函数
+  void startLiveDurationTimer() {
+    // 如果不是直播状态或者 showTime 为空，则不启动定时器
+    if (!(detail.value?.status ?? false) || detail.value?.showTime == null) {
+      liveDuration.value = "00:00:00"; // 未开播时显示 00:00:00
+      _liveDurationTimer?.cancel();
+      return;
+    }
+
+    try {
+      int startTimeStamp = int.parse(detail.value!.showTime!);
+      // 取消之前的定时器
+      _liveDurationTimer?.cancel();
+      // 创建新的定时器，每秒更新一次
+      _liveDurationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        int currentTimeStamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        int durationInSeconds = currentTimeStamp - startTimeStamp;
+
+        int hours = durationInSeconds ~/ 3600;
+        int minutes = (durationInSeconds % 3600) ~/ 60;
+        int seconds = durationInSeconds % 60;
+
+        String formattedDuration =
+            '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+        liveDuration.value = formattedDuration;
+      });
+    } catch (e) {
+      liveDuration.value = "--:--:--"; // 错误时显示 --:--:--
+    }
+  }
+
   @override
   void onClose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1021,6 +1069,7 @@ ${error?.stackTrace}''');
 
     liveDanmaku.stop();
     danmakuController = null;
+    _liveDurationTimer?.cancel(); // 页面关闭时取消定时器
     super.onClose();
   }
 }

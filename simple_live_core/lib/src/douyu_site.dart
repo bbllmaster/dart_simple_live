@@ -9,6 +9,7 @@ import 'package:simple_live_core/src/interface/live_site.dart';
 import 'package:simple_live_core/src/model/live_anchor_item.dart';
 import 'package:simple_live_core/src/model/live_category.dart';
 import 'package:simple_live_core/src/model/live_message.dart';
+import 'package:simple_live_core/src/model/live_play_url.dart';
 import 'package:simple_live_core/src/model/live_room_item.dart';
 import 'package:simple_live_core/src/model/live_search_result.dart';
 import 'package:simple_live_core/src/model/live_room_detail.dart';
@@ -25,6 +26,15 @@ class DouyuSite implements LiveSite {
 
   @override
   LiveDanmaku getDanmaku() => DouyuDanmaku();
+
+  Future<String> Function(String, String) getDouyuSign = (html, rid) async {
+    throw Exception(
+        "You must call setDouyuSignFunction to set the function first");
+  };
+
+  void setDouyuSignFunction(Future<String> Function(String, String) func) {
+    getDouyuSign = func;
+  }
 
   @override
   Future<List<LiveCategory>> getCategores() async {
@@ -121,7 +131,7 @@ class DouyuSite implements LiveSite {
   }
 
   @override
-  Future<List<String>> getPlayUrls(
+  Future<LivePlayUrl> getPlayUrls(
       {required LiveRoomDetail detail,
       required LivePlayQuality quality}) async {
     var args = detail.data.toString();
@@ -134,7 +144,7 @@ class DouyuSite implements LiveSite {
         urls.add(url);
       }
     }
-    return urls;
+    return LivePlayUrl(urls: urls);
   }
 
   Future<String> getPlayUrl(
@@ -183,6 +193,16 @@ class DouyuSite implements LiveSite {
   Future<LiveRoomDetail> getRoomDetail({required String roomId}) async {
     Map roomInfo = await _getRoomInfo(roomId);
 
+    Map h5RoomInfo = await HttpClient.instance.getJson(
+        "https://www.douyu.com/swf_api/h5room/$roomId",
+        queryParameters: {},
+        header: {
+          'referer': 'https://www.douyu.com/$roomId',
+          'user-agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43',
+        });
+    String? showTime = h5RoomInfo["data"]?["show_time"]?.toString();
+
     var jsEncResult = await HttpClient.instance.getText(
         "https://www.douyu.com/swf_api/homeH5Enc?rids=$roomId",
         queryParameters: {},
@@ -192,6 +212,24 @@ class DouyuSite implements LiveSite {
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43"
         });
     var crptext = json.decode(jsEncResult)["data"]["room$roomId"].toString();
+
+    if (showTime != null && showTime.isNotEmpty) {
+      try {
+        int startTimeStamp = int.parse(showTime);
+        int currentTimeStamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        int durationInSeconds = currentTimeStamp - startTimeStamp;
+
+        int hours = durationInSeconds ~/ 3600;
+        int minutes = (durationInSeconds % 3600) ~/ 60;
+        int seconds = durationInSeconds % 60;
+
+        String formattedDuration =
+            '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+        print('斗鱼直播间 $roomId 开播时长: $formattedDuration');
+      } catch (e) {
+        print('计算开播时长出错: $e');
+      }
+    }
 
     return LiveRoomDetail(
       cover: roomInfo["room_pic"].toString(),
@@ -204,9 +242,10 @@ class DouyuSite implements LiveSite {
       notice: "",
       status: roomInfo["show_status"] == 1 && roomInfo["videoLoop"] != 1,
       danmakuData: roomInfo["room_id"].toString(),
-      data: await getPlayArgs(crptext, roomInfo["room_id"].toString()),
+      data: await getDouyuSign(crptext, roomInfo["room_id"].toString()),
       url: "https://www.douyu.com/$roomId",
       isRecord: roomInfo["videoLoop"] == 1,
+      showTime: showTime,
     );
   }
 
@@ -317,26 +356,6 @@ class DouyuSite implements LiveSite {
   Future<bool> getLiveStatus({required String roomId}) async {
     var roomInfo = await _getRoomInfo(roomId);
     return roomInfo["show_status"] == 1 && roomInfo["videoLoop"] != 1;
-  }
-
-  Future<String> getPlayArgs(String html, String rid) async {
-    //取加密的js
-    html = RegExp(
-                r"(vdwdae325w_64we[\s\S]*function ub98484234[\s\S]*?)function",
-                multiLine: true)
-            .firstMatch(html)
-            ?.group(1) ??
-        "";
-    html = html.replaceAll(RegExp(r"eval.*?;}"), "strc;}");
-
-    var result = await HttpClient.instance.postJson(
-        "http://alive.nsapps.cn/api/AllLive/DouyuSign",
-        data: {"html": html, "rid": rid});
-
-    if (result["code"] == 0) {
-      return result["data"].toString();
-    }
-    return "";
   }
 
   int parseHotNum(String hn) {
